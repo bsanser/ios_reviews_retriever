@@ -1,4 +1,3 @@
-from rich import print
 import requests
 import pandas as pd
 from dataclasses import dataclass
