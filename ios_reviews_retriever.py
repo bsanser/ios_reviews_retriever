@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 from dataclasses import dataclass
 
-from config import COUNTRY_CODES, APPS_LIST
+from constants import COUNTRY_CODES, APPS_LIST
 
 
 reviews_list = []
