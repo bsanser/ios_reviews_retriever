@@ -1,4 +1,6 @@
 # 📱 iOS Reviews Retriever
+<img width="1199" alt="Screenshot 2024-12-03 at 21 23 29" src="https://github.com/user-attachments/assets/35bce45a-dd8b-48dd-8131-b004f4905a79">
+
 A simple python script to get the app store reviews of one or more apps and export them to a spreadsheet
 
 <h2>Steps to run the script</h2>
