@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from constants import APPS_LIST
 
@@ -36,6 +37,9 @@ def get_reviews(country_code, app_id):
             return "failed", []
 
         data = r.json()
+
+        # If there are reviews for the country, they will be inside 'feed' > 'entry'. Otherwise, the key 'entry' will not exist
+        # If 'entry' exists, it could hold 2 different types of values depending on whether it only contains 1 review ('dict') or more ('list' of dicts)
         if "feed" in data and "entry" in data["feed"]:
             entry = data["feed"]["entry"]
             if isinstance(entry, dict):
@@ -77,6 +81,31 @@ def parse_reviews(reviews_data):
         print(f"An error occurred: {e}")
 
 
+def fetch_reviews_threaded(app_id, country_codes, max_workers=15):
+    print(f"🚀 Starting threaded review fetch with {max_workers} workers")
+
+    def task(country_code):
+        status, reviews = get_reviews(country_code, app_id)
+        return country_code, status, reviews
+
+    all_reviews = []
+    successful, no_reviews, failed = [], [], []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(task, code): code for code in country_codes}
+        for future in as_completed(futures):
+            country_code, status, reviews = future.result()
+            if status == "success":
+                all_reviews.extend(reviews)
+                successful.append(country_code)
+            elif status == "no_reviews":
+                no_reviews.append(country_code)
+            elif status == "failed":
+                failed.append(country_code)
+
+    return all_reviews, successful, no_reviews, failed
+
+
 def create_pandas_dataframe(reviews_list):
     print("🗂️ Creating dataframe")
     df = pd.DataFrame(reviews_list)
@@ -112,42 +141,48 @@ def main():
     all_failed = set()
     apps_processed = []
 
-    for app in APPS_LIST:
-        all_countries_reviews = []
-        successful_countries = []
-        no_reviews_countries = []
-        failed_countries = []
-        app_name = app.lower()
-        apps_processed.append(app_name)
-        app_id = APPS_LIST[app]
-        print(f"⌛️ Processing app {app_name}")
-        for country_code in tqdm(country_codes, desc=f"📥 {app_name}"):
-            status, country_reviews = get_reviews(country_code, app_id)
-            if status == "success":
-                all_countries_reviews.extend(country_reviews)
-                successful_countries.append(country_code)
-                all_successful.add(country_code)
-            elif status == "no_reviews":
-                no_reviews_countries.append(country_code)
-                all_no_reviews.add(country_code)
-            elif status == "failed":
-                failed_countries.append(country_code)
-                all_failed.add(country_code)
-    parsed_reviews = parse_reviews(all_countries_reviews)
-    sorted_by_most_recent_df = create_pandas_dataframe(parsed_reviews).sort_values(
-        by="date", ascending=False
-    )
-    save_to_excel(sorted_by_most_recent_df, app_name)
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    write_summary_log(
-        sorted(all_successful),
-        sorted(all_no_reviews),
-        sorted(all_failed),
-        apps_processed,
-        elapsed_time,
-    )
-    print(f"Total execution time: {elapsed_time:.2f} seconds")
+    try:
+        for app in APPS_LIST:
+            app_name = app.lower()
+            app_id = APPS_LIST[app]
+            apps_processed.append(app_name)
+            print(f"⌛️ Processing app {app_name}")
+
+            (
+                all_countries_reviews,
+                successful_countries,
+                no_reviews_countries,
+                failed_countries,
+            ) = fetch_reviews_threaded(app_id, country_codes, max_workers=15)
+
+            all_successful.update(successful_countries)
+            all_no_reviews.update(no_reviews_countries)
+            all_failed.update(failed_countries)
+
+            parsed_reviews = parse_reviews(all_countries_reviews)
+            sorted_by_most_recent_df = create_pandas_dataframe(
+                parsed_reviews
+            ).sort_values(by="date", ascending=False)
+            save_to_excel(sorted_by_most_recent_df, app_name)
+
+    except Exception as e:
+        print(f"❌ Script terminated due to error: {e}")
+
+    finally:
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+
+        # 🔐 Make sure this always runs, even if there's an error
+        write_summary_log(
+            sorted(all_successful),
+            sorted(all_no_reviews),
+            sorted(all_failed),
+            apps_processed,
+            elapsed_time,
+        )
+
+        print(f"📝 Summary log written.")
+        print(f"⏱️ Total execution time: {elapsed_time:.2f} seconds")
 
 
 if __name__ == "__main__":
