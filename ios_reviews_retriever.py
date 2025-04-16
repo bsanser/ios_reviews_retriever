@@ -7,9 +7,6 @@ from dataclasses import dataclass
 from constants import COUNTRY_CODES, APPS_LIST
 
 
-reviews_list = []
-
-
 @dataclass
 class Review:
     date: str
@@ -26,6 +23,7 @@ def get_reviews(country_code, app_id):
     print(f"🌎 Getting reviews for country {country_code}")
     url = f"https://itunes.apple.com/{country_code}/rss/customerreviews/id={app_id}/sortBy=mostRecent/json"
     r = requests.get(url)
+    reviews = []
     # If there are reviews for the country, they will be inside 'feed' > 'entry'. Otherwise, the key 'entry' will not exist
     # If 'entry' exists, it could hold 2 different types of values depending on whether it only contains 1 review ('dict') or more ('list' of dicts)
     try:
@@ -35,16 +33,18 @@ def get_reviews(country_code, app_id):
                 entry = r_feed["entry"]
                 if isinstance(entry, dict):
                     entry["country"] = country_code
-                    reviews_list.append(entry)
+                    reviews.append(entry)
 
                 elif isinstance(entry, list):
                     entries_with_country = [
                         {**review, "country": country_code} for review in entry
                     ]
-                    reviews_list.extend(entries_with_country)
+                    reviews.extend(entries_with_country)
 
     except Exception as e:
         print(f"An error occurred: {e}")
+
+    return reviews
 
 
 def parse_reviews(reviews_data):
@@ -81,16 +81,18 @@ def save_to_excel(df, app_name):
 
 def main():
     start_time = time.time()
+    all_countries_reviews = []
     for app in APPS_LIST:
         app_name = app.lower()
         app_id = APPS_LIST[app]
         print(f"⌛️ Processing app {app_name}")
         for country_code in COUNTRY_CODES:
-            get_reviews(country_code, app_id)
-    end_time = time.time()  # Record end time
+            country_reviews = get_reviews(country_code, app_id)
+            all_countries_reviews.extend(country_reviews)
+    end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Total execution time: {elapsed_time:.2f} seconds")
-    parsed_reviews = parse_reviews(reviews_list)
+    parsed_reviews = parse_reviews(all_countries_reviews)
     sorted_by_most_recent_df = create_pandas_dataframe(parsed_reviews).sort_values(
         by="date", ascending=False
     )
