@@ -1,10 +1,11 @@
 import requests
 import pandas as pd
 import time
+import pycountry
 
 from dataclasses import dataclass
 
-from constants import COUNTRY_CODES, APPS_LIST
+from constants import APPS_LIST
 
 
 @dataclass
@@ -17,32 +18,39 @@ class Review:
     vote_sum: int
     vote_count: int
     app_version: str
+    
+def get_all_country_codes():
+    return [
+        country.alpha_2 for country in pycountry.countries]
 
 
 def get_reviews(country_code, app_id):
     print(f"🌎 Getting reviews for country {country_code}")
     url = f"https://itunes.apple.com/{country_code}/rss/customerreviews/id={app_id}/sortBy=mostRecent/json"
-    r = requests.get(url)
     reviews = []
-    # If there are reviews for the country, they will be inside 'feed' > 'entry'. Otherwise, the key 'entry' will not exist
-    # If 'entry' exists, it could hold 2 different types of values depending on whether it only contains 1 review ('dict') or more ('list' of dicts)
+
     try:
-        if "feed" in r.json():
-            r_feed = r.json()["feed"]
-            if "entry" in r_feed.keys():
-                entry = r_feed["entry"]
-                if isinstance(entry, dict):
-                    entry["country"] = country_code
-                    reviews.append(entry)
+        r = requests.get(url, timeout=5)
+        if r.status_code != 200:
+            print(f"⚠️ Failed for {country_code} — Status code: {r.status_code}")
+            return []
 
-                elif isinstance(entry, list):
-                    entries_with_country = [
-                        {**review, "country": country_code} for review in entry
-                    ]
-                    reviews.extend(entries_with_country)
+        data = r.json()
+        if "feed" in data and "entry" in data["feed"]:
+            entry = data["feed"]["entry"]
+            if isinstance(entry, dict):
+                entry["country"] = country_code
+                reviews.append(entry)
+            elif isinstance(entry, list):
+                entries_with_country = [
+                    {**review, "country": country_code} for review in entry
+                ]
+                reviews.extend(entries_with_country)
 
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Request failed for {country_code}: {e}")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"❌ Unexpected error for {country_code}: {e}")
 
     return reviews
 
@@ -82,11 +90,12 @@ def save_to_excel(df, app_name):
 def main():
     start_time = time.time()
     all_countries_reviews = []
+    country_codes = get_all_country_codes()
     for app in APPS_LIST:
         app_name = app.lower()
         app_id = APPS_LIST[app]
         print(f"⌛️ Processing app {app_name}")
-        for country_code in COUNTRY_CODES:
+        for country_code in country_codes:
             country_reviews = get_reviews(country_code, app_id)
             all_countries_reviews.extend(country_reviews)
     end_time = time.time()
